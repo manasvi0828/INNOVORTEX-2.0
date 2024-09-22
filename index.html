@@ -200,70 +200,151 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script>
     const chatBody = document.getElementById('chatBody');
     const messageInput = document.getElementById('messageInput');
-  
-    async function sendMessage() {
-      const userMessage = messageInput.value.trim();
-  
-      if (userMessage === '') return;
-  
-      appendMessage(userMessage, 'user');
-  
-      const response = await fetch('http://localhost:3000/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage })
-      });
-  
-      const data = await response.json();
-  
-      appendMessage(data.message, 'bot');
-  
-      messageInput.value = '';
-      chatBody.scrollTop = chatBody.scrollHeight;
-    }
-  
+
+    const LLAMA_API_URL = "https://phi.us.gaianet.network/v1/chat/completions";
+
+    const tripQuestions = [
+        "What is your destination?",
+        "What type of vacation are you looking for?",
+        "What kind of weather do you prefer?",
+        "How many days are you planning for?",
+        "What is your budget?",
+        "Can you describe your ideal vacation in a few words?",
+        "What is your preferred mode of travel to the destination?",
+        "How do you plan to get around the destination?",
+        "How many people are traveling?",
+        "What type of accommodation do you prefer?",
+        "Any special interests or activities you want to focus on?",
+        "Any dietary preferences or restrictions?"
+    ];
+
+    const responseKeys = [
+        'destinationAnswer',
+        'vacationTypeAnswer',
+        'weatherAnswer',
+        'daysAnswer',
+        'budgetAnswer',
+        'idealVacationAnswer',
+        'travelModeAnswer',
+        'localTravelAnswer',
+        'numberOfPeopleAnswer',
+        'accommodationAnswer',
+        'interestAnswer',
+        'dietAnswer'
+    ];
+
+    let userResponses = {};
+    let currentQuestionIndex = 0;
+
+    // Append a message to the chat
     function appendMessage(message, sender) {
-      const messageElement = document.createElement('div');
-      messageElement.classList.add('message', sender);
-      messageElement.innerHTML = message;  // Use innerHTML to interpret <br> as line breaks
-      chatBody.appendChild(messageElement);
-      chatBody.scrollTop = chatBody.scrollHeight; // Scroll to the bottom after each message
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message', sender);
+        messageElement.innerHTML = message;
+        chatBody.appendChild(messageElement);
+        chatBody.scrollTop = chatBody.scrollHeight; // Scroll to the bottom after each message
     }
-  
-    // Fetch the first question from the server
-    async function fetchFirstQuestion() {
-      try {
-        const response = await fetch('http://localhost:3000/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: '' }) // Initial empty message to start the conversation
-        });
-  
-        const data = await response.json();
-  
-        if (data && data.message) {
-          appendMessage(data.message, 'bot'); // Display the first question from the bot
-        } else {
-          console.error('Error fetching the first question:', data);
+
+    // Compile the final trip plan based on the user's answers and send it to the Llama API
+    async function compileAndSendTripPlan() {
+        const compiledInfo = `
+        You are a trip planning expert which prepares a day-to-day itinerary of the trip for the user. Your answering format should follow this template:
+        Date: "Provide the date"
+        Hotel Recommendation: "Provide hotel recommendation"
+        Morning:
+          Time: "Provide time" | Activity: "Provide activity"
+        Afternoon:
+          Time: "Provide time" | Activity: "Provide activity"
+        Evening:
+          Time: "Provide time" | Activity: "Provide activity"
+
+        A person wants to go to "${userResponses.destinationAnswer}" and have a "${userResponses.vacationTypeAnswer}" type of vacation. Plan the trip when the weather is "${userResponses.weatherAnswer}" and make it "${userResponses.daysAnswer}" days long. The budget is "${userResponses.budgetAnswer}" INR. This person is looking for an experience like this: "${userResponses.idealVacationAnswer}". The preferred mode of travel to the destination is "${userResponses.travelModeAnswer}" and preferred mode of local travel to go around the destination is "${userResponses.localTravelAnswer}". "${userResponses.numberOfPeopleAnswer}" people are going on the trip.
+
+        Give recommendations for "${userResponses.accommodationAnswer}" type of accommodation at the destination. Include "${userResponses.interestAnswer}" in the day-to-day trip plan. The places to eat should follow their preferences: "${userResponses.dietAnswer}".
+        `;
+
+        try {
+            // Send the compiled trip information to the Llama API
+            const response = await axios.post(
+                LLAMA_API_URL,
+                {
+                    messages: [
+                        { role: "system", content: "You are a helpful assistant." },
+                        { role: "user", content: compiledInfo }
+                    ]
+                },
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json"
+                    }
+                }
+            );
+
+            // Display the response from Llama API
+            let aiResponse = response.data.choices[0].message.content.trim();
+
+            // Formatting the response before displaying it
+            let formattedResponse = aiResponse
+                .replace(/\*\*/g, '<br>')
+                .replace(/###/g, '<br>')
+                .replace(/####/g, '<br>');
+            formattedResponse = formattedResponse.replace(/(Date:\s[\w\s,]+)/g, '<b>$1</b><br>');
+            formattedResponse = formattedResponse
+                .replace(/\b(Morning|Afternoon|Evening|Day)\b/g, '<br><b>$1</b>')
+                .replace(/Time:/g, '<br>Time:')
+                .replace(/Activity:/g, '<br>Activity:');
+            formattedResponse = formattedResponse.replace(/\*(.*?)\*/g, '<i>$1</i>');
+
+            // Append the formatted response to the chat
+            appendMessage(formattedResponse, 'bot');
+        } catch (error) {
+            console.error("Error communicating with the Llama API:", error.response?.data || error.message);
+            appendMessage("Error generating the trip plan. Please try again later.", 'bot');
         }
-      } catch (error) {
-        console.error('Error fetching the first question:', error);
-      }
     }
-  
-    // Start the conversation by fetching the first question
-    fetchFirstQuestion(); // Trigger fetching the first question on page load
-  
-    // Enable sending messages with the Enter key
+
+    // Handle sending a message
+    function sendMessage() {
+        const userMessage = messageInput.value.trim();
+
+        if (userMessage === '') return;
+
+        // Append the user's message
+        appendMessage(userMessage, 'user');
+
+        // Store the response for the current question
+        if (currentQuestionIndex < tripQuestions.length) {
+            userResponses[responseKeys[currentQuestionIndex]] = userMessage;
+            currentQuestionIndex++;
+
+            // Ask the next question or compile and send the trip plan to the Llama API
+            if (currentQuestionIndex < tripQuestions.length) {
+                setTimeout(() => {
+                    appendMessage(tripQuestions[currentQuestionIndex], 'bot');
+                }, 500);
+            } else {
+                compileAndSendTripPlan(); // Call the function to send the final info to Llama API
+            }
+        }
+
+        messageInput.value = ''; // Clear the input field
+    }
+
+    // Start the conversation with the first question
+    appendMessage(tripQuestions[currentQuestionIndex], 'bot');
+
+    // Add event listener for the Enter key to send messages
     messageInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        sendMessage();
-      }
+        if (event.key === 'Enter') {
+            sendMessage();
+        }
     });
-  </script>
+</script>
 
 </body>
 </html>
