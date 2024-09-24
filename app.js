@@ -136,8 +136,16 @@ Give recommendations for "${userResponses.accomodationAnswer}" type of accommoda
   }
 });
 
-app.get("/", (req, res) => {
+app.get("/home", (req, res) => {
   res.render("home.ejs")
+})
+
+app.get("/", (req,res) => {
+  res.render("login.ejs");
+})
+
+app.post("/", (req,res) => {
+  res.redirect("/home")
 })
 
 app.listen(3000, () => {
